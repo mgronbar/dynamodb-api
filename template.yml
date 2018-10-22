@@ -1,0 +1,215 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Parameters:
+  TableName:
+    Type: String
+    Default: "ruuviData"
+    Description: (Required) The name of the new DynamoDB table you want to create and save to. Minimum 3 characters
+    MinLength: 3
+    MaxLength: 50
+    AllowedPattern: ^[A-Za-z_]+$
+    ConstraintDescription: "Required parameter. Must be characters and/or underscores. No numbers allowed."
+  CorsOrigin:
+    Type: String
+    Default: ""
+    Description: (Optional) Cross-origin resource sharing (CORS) Origin. You can specify a single origin, all "*" or leave empty and no CORS will be applied.
+    MaxLength: 250
+Conditions:
+  IsCorsDefined: !Not [!Equals [!Ref CorsOrigin, ""]]
+Resources:
+  RuuviApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      DefinitionBody:
+        swagger: 2.0
+        info:
+          title:
+            Ref: AWS::StackName
+        x-amazon-apigateway-request-validators:
+          all:
+            validateRequestBody: true
+            validateRequestParameters: true
+        paths:
+          /ruuvi:
+            get:
+              responses:
+                "200":
+                  description: "200 response"
+                  schema:
+                    $ref: "#/definitions/ruuviModel"
+              security:
+                - api_key: []
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetRuuviLambda.Arn}/invocations
+            post:
+              consumes:
+                - "application/json"
+              x-amazon-apigateway-request-validator: all
+              parameters:
+                - in: "body"
+                  name: "ruuviModel"
+                  required: true
+                  schema:
+                    $ref: "#/definitions/ruuviModel"
+              responses:
+                "204":
+                  description: "204 response"
+              security:
+                - api_key: []
+              x-amazon-apigateway-integration:
+                httpMethod: POST
+                type: aws_proxy
+                uri:
+                  Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaSaver.Arn}/invocations
+        securityDefinitions:
+          api_key:
+            type: "apiKey"
+            name: "x-api-key"
+            in: "header"
+        definitions:
+          ruuviModel:
+            type: "object"
+            required:
+              - "payload"
+              - "timestamp"
+            properties:
+              timestamp:
+                type: "string"
+                format: "date-time"
+              payload:
+                type: "object"
+                additionalProperties:
+                  type: "integer"
+                  description: "integer values"
+            title: "data-api"
+    DependsOn: GetRuuviLambda
+  GetRuuviLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.get
+      Runtime: nodejs8.10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TableName
+          IS_CORS: IsCorsDefined
+          CORS_ORIGIN: !Ref CorsOrigin
+          PRIMARY_KEY: !Sub ${TableName}Id
+          ITEM_KEY: !Sub ${TableName}Key
+      Policies:
+        - Statement:
+            - Action:
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+                - dynamodb:PutItem
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+                - dynamodb:BatchWriteItem
+                - dynamodb:BatchGetItem
+              Resource:
+                Fn::Sub:
+                  - arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${tableName}
+                  - tableName:
+                      Ref: TableName
+              Effect: Allow
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /heatcontrol
+            Method: GET
+            RestApiId: !Ref RuuviApi
+  LambdaSaver:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.post
+      Runtime: nodejs8.10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref TableName
+          IS_CORS: IsCorsDefined
+          CORS_ORIGIN: !Ref CorsOrigin
+          PRIMARY_KEY: !Sub ${TableName}Id
+          ITEM_KEY: !Sub ${TableName}Key
+      Policies:
+        - Statement:
+            - Action:
+                - dynamodb:GetItem
+                - dynamodb:DeleteItem
+                - dynamodb:PutItem
+                - dynamodb:Scan
+                - dynamodb:Query
+                - dynamodb:UpdateItem
+                - dynamodb:BatchWriteItem
+                - dynamodb:BatchGetItem
+              Resource:
+                Fn::Sub:
+                  - arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${tableName}
+                  - tableName:
+                      Ref: TableName
+              Effect: Allow
+      Events:
+        Api:
+          Type: Api
+          Properties:
+            Path: /heatcontrol
+            Method: POST
+            RestApiId: !Ref RuuviApi
+  DynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref TableName
+      AttributeDefinitions:
+        - AttributeName: !Sub ${TableName}Id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: !Sub ${TableName}Id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      StreamSpecification:
+        StreamViewType: NEW_IMAGE
+  UsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      ApiStages:
+        - ApiId: !Ref "RuuviApi"
+          Stage: "prod"
+      Description: Ruuvi plan usage plan
+      Quota:
+        Limit: 5000
+        Period: MONTH
+      Throttle:
+        BurstLimit: 200
+        RateLimit: 100
+      UsagePlanName: Ruuvi_plan
+    DependsOn: RuuviApiprodStage
+  ApiKey:
+    Type: AWS::ApiGateway::ApiKey
+    DependsOn:
+      - "RuuviApi"
+    Properties:
+      Name: "TestApiKey"
+      Description: "CloudFormation Test API Key V1"
+      Enabled: "true"
+  UsagePlanKey:
+    Type: AWS::ApiGateway::UsagePlanKey
+    Properties:
+      KeyId: !Ref "ApiKey"
+      KeyType: API_KEY
+      UsagePlanId: !Ref "UsagePlan"
+Outputs:
+  ApiUrl:
+    Value: !Sub https://${RuuviApi}.execute-api.${AWS::Region}.amazonaws.com/prod/${TableName}
+    Description: The URL of the API Gateway you invoke with a GET request to retrieve all of your items in the DynamoDB Table.
+  DynamoDBTableArn:
+    Value: !GetAtt DynamoDBTable.Arn
+    Description: The ARN of your DynamoDB Table
+  DynamoDBTableStreamArn:
+    Value: !GetAtt DynamoDBTable.StreamArn
+    Description: The ARN of your DynamoDB Table Stream
