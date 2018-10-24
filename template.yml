@@ -3,7 +3,7 @@ Transform: AWS::Serverless-2016-10-31
 Parameters:
   TableName:
     Type: String
-    Default: "ruuviData"
+    Default: "ruuviDataTable"
     Description: (Required) The name of the new DynamoDB table you want to create and save to. Minimum 3 characters
     MinLength: 3
     MaxLength: 50
@@ -22,10 +22,10 @@ Resources:
     Properties:
       StageName: prod
       DefinitionBody:
-        swagger: 2.0
+        swagger: "2.0"
         info:
-          title:
-            Ref: AWS::StackName
+          title: 
+             Ref: AWS::StackName
         x-amazon-apigateway-request-validators:
           all:
             validateRequestBody: true
@@ -33,38 +33,87 @@ Resources:
         paths:
           /ruuvi:
             get:
+              produces:
+              - "application/json"
+              parameters:
+              - name: "start"
+                in: "query"
+                required: false
+                type: "number"
+              - name: "end"
+                in: "query"
+                required: false
+                type: "number"
+              - name: "address"
+                in: "query"
+                required: false
+                type: "string"
               responses:
                 "200":
                   description: "200 response"
                   schema:
                     $ref: "#/definitions/ruuviModel"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
               security:
-                - api_key: []
+              - api_key: []
               x-amazon-apigateway-integration:
-                httpMethod: POST
-                type: aws_proxy
-                uri:
+                uri: 
                   Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetRuuviLambda.Arn}/invocations
+                passthroughBehavior: "when_no_match"
+                httpMethod: "POST"
+                contentHandling: "CONVERT_TO_TEXT"
+                type: "aws_proxy"
             post:
               consumes:
-                - "application/json"
-              x-amazon-apigateway-request-validator: all
+              - "application/json"
               parameters:
-                - in: "body"
-                  name: "ruuviModel"
-                  required: true
-                  schema:
-                    $ref: "#/definitions/ruuviModel"
+              - in: "body"
+                name: "ruuviModel"
+                required: true
+                schema:
+                  $ref: "#/definitions/ruuviModel"
               responses:
                 "204":
                   description: "204 response"
               security:
-                - api_key: []
+              - api_key: []
+              x-amazon-apigateway-request-validator: "all"
               x-amazon-apigateway-integration:
-                httpMethod: POST
-                type: aws_proxy
+                httpMethod: "POST"
+                type: "aws_proxy"
                 uri:
                   Fn::Sub: arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaSaver.Arn}/invocations
+                passthroughBehavior: "when_no_match"
+                contentHandling: "CONVERT_TO_TEXT"
+            options:
+              consumes:
+              - "application/json"
+              produces:
+              - "application/json"
+              responses:
+                "200":
+                  description: "200 response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                passthroughBehavior: "when_no_match"
+                type: "mock"
         securityDefinitions:
           api_key:
             type: "apiKey"
@@ -74,18 +123,29 @@ Resources:
           ruuviModel:
             type: "object"
             required:
-              - "payload"
-              - "timestamp"
+            - "payload"
+            - "tagid"
+            - "created"
             properties:
-              timestamp:
-                type: "string"
-                format: "date-time"
               payload:
                 type: "object"
                 additionalProperties:
-                  type: "integer"
-                  description: "integer values"
+                  type: "number"
+                  description: "values"
+              created:
+                type: "integer"
+              tagid:
+                type: "string"
+              address:
+                type: "string"
             title: "data-api"
+        x-amazon-apigateway-gateway-responses:
+          DEFAULT_4XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+              gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        
     DependsOn: GetRuuviLambda
   GetRuuviLambda:
     Type: AWS::Serverless::Function
@@ -123,6 +183,7 @@ Resources:
             Path: /heatcontrol
             Method: GET
             RestApiId: !Ref RuuviApi
+    DependsOn: DynamoDBTable
   LambdaSaver:
     Type: AWS::Serverless::Function
     Properties:
@@ -159,15 +220,18 @@ Resources:
             Path: /heatcontrol
             Method: POST
             RestApiId: !Ref RuuviApi
+    DependsOn: DynamoDBTable
   DynamoDBTable:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: !Ref TableName
       AttributeDefinitions:
-        - AttributeName: !Sub ${TableName}Id
+        -
+          AttributeName: !Sub ${TableName}Id
           AttributeType: S
       KeySchema:
-        - AttributeName: !Sub ${TableName}Id
+        -
+          AttributeName: !Sub ${TableName}Id
           KeyType: HASH
       ProvisionedThroughput:
         ReadCapacityUnits: 1

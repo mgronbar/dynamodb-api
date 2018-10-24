@@ -1,0 +1,41 @@
+{
+  "name": "api-lambda-get-all-dynamodb",
+  "version": "1.0.2",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "package": "aws --profile ${AWS_PROFILE} cloudformation package --template-file template.yml --output-template-file output.yml --s3-bucket dynamo-api-ruuvi-storage",
+    "deploy": "aws --profile ${AWS_PROFILE} cloudformation deploy  --template-file output.yml --stack-name ruuvi-api  --capabilities CAPABILITY_IAM",
+    "packageDeploy": "yarn package && yarn deploy",
+    "precommit": "lint-staged"
+  },
+  "config": {
+    "table_name": "jousto-api",
+    "CorsOrigin": "*"
+  },
+  "keywords": [],
+  "author": "Marko",
+  "license": "UNLICENCED",
+  "dependencies": {
+    "uuidv4": "^2.0.0"
+  },
+  "lint-staged": {
+    "*.{js,json,graphql,md,css,scss,less,ts}": [
+      "prettier --single-quote --trailing-comma all --write",
+      "git add"
+    ]
+  },
+  "devDependencies": {
+    "eslint": "^4.19.1",
+    "eslint-config-airbnb": "^16.1.0",
+    "eslint-config-airbnb-base": "^12.1.0",
+    "eslint-config-motley": "9.0.0",
+    "eslint-config-prettier": "^2.9.0",
+    "eslint-plugin-import": "^2.11.0",
+    "eslint-plugin-jsx-a11y": "^6.0.3",
+    "eslint-plugin-react": "^7.7.0",
+    "husky": "^0.14.3",
+    "lint-staged": "^7.1.0",
+    "prettier": "^1.12.1"
+  }
+}
